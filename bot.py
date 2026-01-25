@@ -22,13 +22,24 @@ from clicker import (
     load_data, save_data, get_player_key, create_player, get_player,
     add_money, update_click_time, upgrade_income_per_click,
     set_player_money, set_player_level, set_income_per_click,
-    issue_certificate, get_server_top, DATA_FILE, clear_active_game,
+    set_income_per_sec, issue_certificate, get_server_top, DATA_FILE, clear_active_game,
     calculate_upgrade_cost, BASE_CLICK_UPGRADE_COST,
     reset_player_progress
 )
 
 # Імпортуємо систему бізнесу
-from biznes import setup_business, get_total_profit
+from biznes import setup_business, get_total_profit, reset_player_businesses
+
+# Імпортуємо казино модуль
+from kazino import setup_casino, reset_casino_stats
+
+# Імпортуємо модуль баночки молочка
+from banka import (
+    load_banka_data, save_banka_data, get_banka_key, get_user_banka,
+    add_progress, reset_user_banka, get_progress_bar,
+    BANKA_IMAGE_URL, BANKA_COMPLETE_IMAGE_URL,
+    get_total_completed_count, add_to_total_completed
+)
 
 # ============ КОНФІГ ============
 # Токен бота
@@ -67,12 +78,13 @@ def home():
     return "Я живий! 🟢"
 
 def run():
-    app.run(host='0.0.0.0', port=8000)
+    app.run(host='0.0.0.0', port=5000)
 
 def keep_alive():
     t = Thread(target=run)
     t.daemon = True
     t.start()
+    print("✅ Keep-alive server started on port 5000")
 
 # ============ ІНТЕНТИ ДИСКОРДУ ============
 
@@ -276,16 +288,16 @@ async def users_certification_command(ctx):
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     data = load_data()
     server_id = ctx.guild.id
-    
+
     # Фільтруємо користувачів з сертифікатом на цьому сервері
     certified_users = [
         player for player in data["users"].values()
         if player["server_id"] == server_id and player.get("has_certificate", False)
     ]
-    
+
     if not certified_users:
         embed = discord.Embed(
             title="🎖️ Сертифікована користувачі",
@@ -294,7 +306,7 @@ async def users_certification_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     # Створити списко сертифікованих користувачів
     certification_list = []
     for player in certified_users:
@@ -309,9 +321,9 @@ async def users_certification_command(ctx):
                 formatted_date = cert_date
         else:
             formatted_date = "Невідомо"
-        
+
         certification_list.append(f"{user_mention} - {formatted_date}")
-    
+
     embed = discord.Embed(
         title="🎖️ Користувачі з сертифікатом",
         description="\n".join(certification_list) if certification_list else "Немає.",
@@ -326,15 +338,15 @@ async def add_money_command(ctx, member: discord.Member = None, amount: int = No
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     if member is None or amount is None:
         await ctx.send("❌ Використання: `!addmoney @користувач кількість_грошей`")
         return
-    
+
     if amount < 0:
         await ctx.send("❌ Кількість грошей не може бути негативною!")
         return
-    
+
     server_id = ctx.guild.id
     if set_player_money(member.id, server_id, (get_player(member.id, server_id)["money"] if get_player(member.id, server_id) else 0) + amount):
         player = get_player(member.id, server_id)
@@ -354,15 +366,15 @@ async def remove_money_command(ctx, member: discord.Member = None, amount: int =
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     if member is None or amount is None:
         await ctx.send("❌ Використання: `!removemoney @користувач кількість_грошей`")
         return
-    
+
     if amount < 0:
         await ctx.send("❌ Кількість грошей не може бути негативною!")
         return
-    
+
     server_id = ctx.guild.id
     player = get_player(member.id, server_id)
     if player:
@@ -384,15 +396,15 @@ async def set_level_command(ctx, member: discord.Member = None, level: int = Non
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     if member is None or level is None:
         await ctx.send("❌ Використання: `!setlevel @користувач рівень`")
         return
-    
+
     if level < 1:
         await ctx.send("❌ Рівень не може бути менше 1!")
         return
-    
+
     server_id = ctx.guild.id
     if set_player_level(member.id, server_id, level):
         player = get_player(member.id, server_id)
@@ -412,15 +424,15 @@ async def set_click_dps_command(ctx, member: discord.Member = None, amount: int 
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     if member is None or amount is None:
         await ctx.send("❌ Використання: `!setclickdps @користувач кількість`")
         return
-    
+
     if amount < 1:
         await ctx.send("❌ Дохід не може бути менше 1!")
         return
-    
+
     server_id = ctx.guild.id
     if set_income_per_click(member.id, server_id, amount):
         player = get_player(member.id, server_id)
@@ -441,13 +453,25 @@ async def reset_command(ctx, member: discord.Member = None):
     if OWNER_ID and ctx.author.id != OWNER_ID and ctx.author.id not in admin_ids:
         await ctx.send("⛔ Ти не маєш доступу до адмін-команд.")
         return
-    
+
     if member is None:
         await ctx.send("❌ Використання: `!reset @користувач`")
         return
-    
+
     server_id = ctx.guild.id
     if reset_player_progress(member.id, server_id):
+        # Скидуємо всі бізнеси гравця
+        reset_player_businesses(member.id, server_id)
+        
+        # Скидуємо казино статистику
+        reset_casino_stats(member.id, server_id)
+        
+        # Скидуємо пасивний дохід на 0
+        set_income_per_sec(member.id, server_id, 0)
+        
+        # Очищуємо активну гру гравця
+        clear_active_game(member.id, server_id, active_games)
+        
         embed = discord.Embed(
             title=f"🔄 Прогрес скинено",
             description=f"Прогрес користувача {member.mention} скинено на початковий рівень",
@@ -456,6 +480,8 @@ async def reset_command(ctx, member: discord.Member = None):
         embed.add_field(name="💰 Монети", value="**0**", inline=True)
         embed.add_field(name="📊 Рівень Кліку", value="**1**", inline=True)
         embed.add_field(name="⚡ Рівень Пасиву", value="**0**", inline=True)
+        embed.add_field(name="🏢 Бізнеси", value="**Видалено**", inline=True)
+        embed.add_field(name="🎰 Казино Статистика", value="**Видалено**", inline=True)
         await ctx.send(embed=embed)
     else:
         await ctx.send(f"❌ У користувача {member.mention} немає профілю!")
@@ -520,21 +546,24 @@ async def help_command(ctx):
     )
     embed.add_field(name="💼 Команди бізнесу", value=business_cmds, inline=False)
 
+    casino_cmds = (
+        "`!kazino` - грати в казино (вибір множника x2, x3, x5, x10)\n"
+        "`!kazino_stats` - твоя казино статистика"
+    )
+    embed.add_field(name="🎰 Команди казино", value=casino_cmds, inline=False)
+
+    banka_cmds = (
+        "`!banochka` - відкрити баночку молочка (натискай 4 рази!)\n"
+        "`!stats_banochka` - статистика твоїх баночок"
+    )
+    embed.add_field(name="🥛 Команди баночки молочка", value=banka_cmds, inline=False)
+
     user_cmds = (
         "`!тест` - перевірити роботу бота\n"
         "`!активність [@user]` - подивитись активність\n"
         "`!help` - ця довідка"
     )
     embed.add_field(name="👤 Команди користувачів", value=user_cmds, inline=False)
-
-    if actions:
-        actions_list = ", ".join([f"`{a}`" for a in actions.keys()])
-        embed.add_field(name="✨ Доступні дії", value=actions_list, inline=False)
-        embed.add_field(
-            name="💡 Як використовувати дії?",
-            value="Напиши повідомлення з ключовим словом та згадай (@) користувача",
-            inline=False
-        )
 
     embed.set_footer(text=f"Бот: {bot.user.name}")
     await ctx.send(embed=embed)
@@ -583,14 +612,22 @@ async def on_ready():
         print(f"✅ Система бізнесу завантажена")
     except Exception as e:
         print(f"❌ Помилка завантаження бізнесу: {e}")
+    
+    # Завантажуємо казино модуль
+    try:
+        await setup_casino(bot)
+        print(f"✅ Казино модуль завантажений")
+    except Exception as e:
+        print(f"❌ Помилка завантаження казино: {e}")
     # Запускаємо цикл оновлення меню
     update_game_display.start()
+
 
 # ============ ТЕСТ СЕРТИФІКАЦІЇ ============
 
 class TestView(discord.ui.View):
     """Вьюха для тесту сертифікації."""
-    
+
     def __init__(self, user_id: int, question_num: int, answers: dict):
         super().__init__(timeout=300)
         self.user_id = user_id
@@ -598,7 +635,7 @@ class TestView(discord.ui.View):
         self.answers = answers
         self.score = answers.get("score", 0)
         self.user_answers = answers.get("user_answers", {})
-    
+
     async def on_timeout(self):
         """Час тесту вичерпався."""
         pass
@@ -662,7 +699,7 @@ user_test_progress = {}  # Зберігає прогрес тесту {user_id: 
 async def certification_command(ctx):
     """Почати тест сертифікації на Негев."""
     user_id = ctx.author.id
-    
+
     # Перевірити чи користувач вже проходить тест
     if user_id in user_test_progress:
         embed = discord.Embed(
@@ -672,7 +709,7 @@ async def certification_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     # Запустити перший вопрос
     user_test_progress[user_id] = {
         "question": 0,
@@ -683,23 +720,23 @@ async def certification_command(ctx):
         "message": None,
         "results_message": None
     }
-    
+
     await show_test_question(user_id)
 
 async def show_test_question(user_id):
     """Показати поточне питання тесту."""
     if user_id not in user_test_progress:
         return
-    
+
     progress = user_test_progress[user_id]
     q_idx = progress["question"]
-    
+
     if q_idx >= len(NEGEV_TEST):
         # Тест завершено
         score = progress["score"]
         total = len(NEGEV_TEST)
         percentage = (score / total) * 100
-        
+
         embed = discord.Embed(
             title="✅ Тест завершено!",
             description=f"Вітаємо з завершенням тесту на сертифікацію Негев!",
@@ -710,7 +747,7 @@ async def show_test_question(user_id):
             value=f"**{score}/{total}** правильних відповідей ({percentage:.1f}%)",
             inline=False
         )
-        
+
         # Видати сертифікат якщо 7/7
         if score == 7:
             embed.add_field(
@@ -740,7 +777,7 @@ async def show_test_question(user_id):
                 value="**Потрібна практика.** Вивчай більше про Негев!",
                 inline=False
             )
-        
+
         # Оновити повідомлення тесту
         if progress["message"]:
             try:
@@ -748,28 +785,28 @@ async def show_test_question(user_id):
             except:
                 channel = progress["channel"]
                 await channel.send(embed=embed)
-        
+
         # Видалити з прогресу
         del user_test_progress[user_id]
         return
-    
+
     question = NEGEV_TEST[q_idx]
     embed = discord.Embed(
         title=f"❓ Питання {question['number']}/7",
         description=question["question"],
         color=COLOR_INFO
     )
-    
+
     channel = progress["channel"]
-    
+
     if question["type"] == "choice":
         view = ChoiceTestView(user_id, question)
-        
+
         # Якщо це перше питання - створити нове повідомлення
         if progress["message"] is None:
             message = await channel.send(embed=embed, view=view)
             progress["message"] = message
-            
+
             # Створити повідомлення з результатами
             results_embed = discord.Embed(
                 title="📝 Результати відповідей",
@@ -788,13 +825,13 @@ async def show_test_question(user_id):
 
 class ChoiceTestView(discord.ui.View):
     """Вьюха для питань з варіантами."""
-    
+
     def __init__(self, user_id: int, question: dict):
         super().__init__(timeout=300)
         self.user_id = user_id
         self.question = question
         self.answered = False
-        
+
         # Додати кнопки для варіантів
         for idx, choice in enumerate(question["choices"]):
             btn = discord.ui.Button(
@@ -804,7 +841,7 @@ class ChoiceTestView(discord.ui.View):
             )
             btn.callback = self.make_choice_callback(idx)
             self.add_item(btn)
-    
+
     def make_choice_callback(self, choice_idx: int):
         """Створити callback для вибору."""
         async def callback(interaction: discord.Interaction):
@@ -812,31 +849,31 @@ class ChoiceTestView(discord.ui.View):
             if interaction.user.id != self.user_id:
                 await interaction.response.send_message("❌ Це не твій тест!", ephemeral=True)
                 return
-            
+
             # Перевіряємо чи користувач вже в тесті
             if self.user_id not in user_test_progress:
                 await interaction.response.send_message("❌ Тест завершено або скасовано!", ephemeral=True)
                 return
-            
+
             if self.answered:
                 await interaction.response.send_message("❌ Ти вже відповів на це питання!", ephemeral=True)
                 return
-            
+
             self.answered = True
-            
+
             selected_answer = self.question["choices"][choice_idx]
-            
+
             # Перевірити відповідь
             progress = user_test_progress[self.user_id]
             progress["user_answers"][self.question["number"]] = selected_answer
-            
+
             is_correct = selected_answer == self.question["answer"]
             if is_correct:
                 progress["score"] += 1
                 result_text = f"{self.question['number']}) ✅ Правильно"
             else:
                 result_text = f"{self.question['number']}) ❌ Неправильно"
-            
+
             # Оновити повідомлення з результатами
             if progress["results_message"]:
                 try:
@@ -845,7 +882,7 @@ class ChoiceTestView(discord.ui.View):
                         new_description = current_description + "\n" + result_text
                     else:
                         new_description = result_text
-                    
+
                     results_embed = discord.Embed(
                         title="📝 Результати відповідей",
                         description=new_description,
@@ -854,16 +891,108 @@ class ChoiceTestView(discord.ui.View):
                     await progress["results_message"].edit(embed=results_embed)
                 except:
                     pass
-            
+
             await interaction.response.defer()
-            
+
             # Перейти до наступного питання
             progress["question"] += 1
             await show_test_question(self.user_id)
-        
+
         return callback
 
 
+# ============ БАНОЧКА МОЛОЧКА ============
+
+class BankaCompleteView(discord.ui.View):
+    """Вьюха після завершення баночки з кнопкою 'Зіграти ще раз'."""
+
+    def __init__(self, user_id: int, server_id: int, ctx_or_interaction):
+        super().__init__(timeout=600)
+        self.user_id = user_id
+        self.server_id = server_id
+        self.ctx_or_interaction = ctx_or_interaction
+
+    @discord.ui.button(label="Зіграти ще раз", style=discord.ButtonStyle.success, emoji="🔄")
+    async def replay_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Клік на кнопку 'Зіграти ще раз'."""
+        # Перевіряємо чи це той самий користувач
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Це не твоя баночка!", ephemeral=True)
+            return
+
+        # Скидаємо баночку
+        reset_user_banka(self.user_id, self.server_id)
+
+        # Отримуємо оновлені дані баночки
+        banka = get_user_banka(self.user_id, self.server_id)
+
+        # Показуємо нову баночку
+        embed = discord.Embed(
+            title=f"🥛 Баночка молочка {interaction.user.name}",
+            description=f"Прогрес: {get_progress_bar(banka['progress'])} **{banka['progress']}%**\n\nКліки потрібно: 4",
+            color=COLOR_INFO
+        )
+        embed.set_image(url=BANKA_IMAGE_URL)
+
+        view = BankaView(self.user_id, self.server_id)
+        await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_timeout(self):
+        """Час вичерпався."""
+        pass
+
+
+class BankaView(discord.ui.View):
+    """Вьюха для баночки з молочком."""
+
+    def __init__(self, user_id: int, server_id: int):
+        super().__init__(timeout=600)  # 10 хвилин
+        self.user_id = user_id
+        self.server_id = server_id
+
+    @discord.ui.button(label="Видояти", style=discord.ButtonStyle.primary, emoji="🥛")
+    async def click_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        """Клік на кнопку 'Видояти'."""
+        # Перевіряємо чи це той самий користувач
+        if interaction.user.id != self.user_id:
+            await interaction.response.send_message("❌ Це не твоя баночка!", ephemeral=True)
+            return
+
+        # Додаємо 25% прогресу
+        new_progress = add_progress(self.user_id, self.server_id)
+
+        # Отримуємо дані баночки
+        banka = get_user_banka(self.user_id, self.server_id)
+
+        # Якщо не завершено - оновлюємо повідомлення
+        if new_progress < 100:
+            embed = discord.Embed(
+                title=f"🥛 Баночка молочка {interaction.user.name}",
+                description=f"Прогрес: {get_progress_bar(new_progress)} **{new_progress}%**\n\nКліки ще: {(100 - new_progress) // 25}",
+                color=COLOR_INFO
+            )
+            embed.set_image(url=BANKA_IMAGE_URL)
+            
+            await interaction.response.edit_message(embed=embed, view=self)
+        else:
+            # Баночка завершена! Додаємо до лічильника
+            add_to_total_completed(self.user_id, self.server_id)
+            total_count = get_total_completed_count(self.user_id, self.server_id)
+            
+            embed = discord.Embed(
+                title="✅ Успішно!",
+                description=f"🎉 {interaction.user.mention} успішно отримав баночку з молочком!\n\n📊 Всього баночок: **{total_count}**",
+                color=COLOR_SUCCESS
+            )
+            embed.set_image(url=BANKA_COMPLETE_IMAGE_URL)
+            
+            # Показуємо кнопку "Зіграти ще раз"
+            view = BankaCompleteView(self.user_id, self.server_id, interaction)
+            await interaction.response.edit_message(embed=embed, view=view)
+
+    async def on_timeout(self):
+        """Час для баночки вичерпався."""
+        pass
 
 
 # ============ КОМАНДИ ============
@@ -873,7 +1002,7 @@ async def start_command(ctx):
     """Створити профіль."""
     user_id = ctx.author.id
     server_id = ctx.guild.id
-    
+
     if get_player(user_id, server_id):
         embed = discord.Embed(
             title=EMOJI_ERROR + " Вже зареєстрований",
@@ -882,7 +1011,7 @@ async def start_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     if create_player(user_id, server_id):
         embed = discord.Embed(
             title=EMOJI_SUCCESS + " Профіль створено!",
@@ -913,9 +1042,9 @@ async def profile_command(ctx):
     """Показати профіль гравця."""
     user_id = ctx.author.id
     server_id = ctx.guild.id
-    
+
     player = get_player(user_id, server_id)
-    
+
     if not player:
         embed = discord.Embed(
             title=EMOJI_ERROR + " Немає профілю",
@@ -924,14 +1053,14 @@ async def profile_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     embed = discord.Embed(
         title=f"{EMOJI_PROFILE} Профіль {ctx.author.name}",
         color=COLOR_INFO
     )
     if ctx.author.avatar:
         embed.set_thumbnail(url=ctx.author.avatar.url)
-    
+
     embed.add_field(
         name=f"{EMOJI_MONEY} Баланс",
         value=f"**{player['money']:,}** 💵",
@@ -947,30 +1076,30 @@ async def profile_command(ctx):
         value=datetime.fromisoformat(player["created_at"]).strftime("%d.%m.%Y"),
         inline=True
     )
-    
+
     embed.add_field(
         name="💸 Дохід за клік",
         value=f"**{player['income_per_click']}**",
         inline=False
     )
-    
+
     click_upgrade_cost = calculate_upgrade_cost(BASE_CLICK_UPGRADE_COST, player["level"])
-    
+
     embed.add_field(
         name="Вартість Апгрейду (Наступний Рівень)",
         value=f"💰 Апгрейд Клік: {click_upgrade_cost} 💵",
         inline=False
     )
-    
+
     await ctx.send(embed=embed)
 
 @bot.command(name="top")
 async def top_command(ctx):
     """Показати лідербордус сервера."""
     server_id = ctx.guild.id
-    
+
     top_players = get_server_top(server_id, limit=10)
-    
+
     if not top_players:
         embed = discord.Embed(
             title=EMOJI_ERROR + " Немає гравців",
@@ -979,13 +1108,13 @@ async def top_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     embed = discord.Embed(
         title=f"{EMOJI_TOP} Топ 10 Гравців - {ctx.guild.name}",
         description="Лідербордус сервера (тільки гроші)",
         color=COLOR_INFO
     )
-    
+
     leaderboard_text = ""
     for player in top_players:
         try:
@@ -993,7 +1122,7 @@ async def top_command(ctx):
             username = user.name
         except:
             username = f"Unknown User ({player['user_id']})"
-        
+
         if player["position"] == 1:
             medal = "🥇"
         elif player["position"] == 2:
@@ -1002,13 +1131,13 @@ async def top_command(ctx):
             medal = "🥉"
         else:
             medal = "  "
-        
+
         leaderboard_text += f"{medal} **{player['position']}. {username}**\n"
         leaderboard_text += f"   💵 {player['money']:,} | Lv. {player['level']} | 💸 +{player['income_per_click']}/клік\n"
-    
+
     embed.description = leaderboard_text
     embed.set_footer(text="Топ 10 гравців на цьому сервері")
-    
+
     await ctx.send(embed=embed)
 
 @bot.command(name="clicker")
@@ -1016,9 +1145,9 @@ async def clicker_command(ctx):
     """Показати інтерфейс гри."""
     user_id = ctx.author.id
     server_id = ctx.guild.id
-    
+
     player = get_player(user_id, server_id)
-    
+
     if not player:
         embed = discord.Embed(
             title=EMOJI_ERROR + " Немає профілю",
@@ -1027,7 +1156,7 @@ async def clicker_command(ctx):
         )
         await ctx.send(embed=embed)
         return
-    
+
     embed = discord.Embed(
         title=f"{EMOJI_CLICK} Гра Клікер - {ctx.author.name}",
         color=COLOR_INFO
@@ -1047,7 +1176,7 @@ async def clicker_command(ctx):
         value=f"**{player['income_per_click']}**",
         inline=True
     )
-    
+
     # Додаємо прибиль від бізнесу
     business_profit = get_total_profit(user_id, server_id)
     if business_profit > 0:
@@ -1056,24 +1185,96 @@ async def clicker_command(ctx):
             value=f"**{business_profit:.2f}** 💵 в 15 секунд",
             inline=False
         )
-    
+
     view = GameView(user_id, server_id)
-    
+
     message = await ctx.send(embed=embed, view=view)
-    
+
     # Зберігаємо посилання на повідомлення для оновлення
     active_games[(user_id, server_id)] = (message, ctx.channel)
+
+@bot.command(name="banochka")
+async def banochka_command(ctx):
+    """Показати баночку молочка."""
+    user_id = ctx.author.id
+    server_id = ctx.guild.id
+
+    # Отримуємо дані баночки
+    banka = get_user_banka(user_id, server_id)
+
+    # Якщо баночка вже завершена, скидаємо її для нової гри
+    if banka['completed']:
+        reset_user_banka(user_id, server_id)
+        banka = get_user_banka(user_id, server_id)
+
+    # Створюємо embed
+    embed = discord.Embed(
+        title=f"🥛 Баночка молочка {ctx.author.name}",
+        description=f"Прогрес: {get_progress_bar(banka['progress'])} **{banka['progress']}%**\n\nКліки потрібно: 4",
+        color=COLOR_INFO
+    )
+
+    embed.set_image(url=BANKA_IMAGE_URL)
+    view = BankaView(user_id, server_id)
+
+    await ctx.send(embed=embed, view=view)
+
+@bot.command(name="stats_banochka")
+async def stats_banochka_command(ctx):
+    """Показати статистику баночок юзера."""
+    user_id = ctx.author.id
+    server_id = ctx.guild.id
+
+    # Отримуємо дані баночки
+    banka = get_user_banka(user_id, server_id)
+    total_completed = get_total_completed_count(user_id, server_id)
+
+    # Створюємо embed зі статистикою
+    embed = discord.Embed(
+        title=f"🥛 Статистика баночок - {ctx.author.name}",
+        color=COLOR_INFO
+    )
+
+    embed.add_field(
+        name="📊 Всього завершено баночок",
+        value=f"**{total_completed}** 🥛",
+        inline=False
+    )
+
+    embed.add_field(
+        name="📈 Поточний прогрес",
+        value=f"{get_progress_bar(banka['progress'])} **{banka['progress']}%**",
+        inline=False
+    )
+
+    embed.add_field(
+        name="⏰ Перша баночка створена",
+        value=datetime.fromisoformat(banka['created_at']).strftime("%d.%m.%Y %H:%M"),
+        inline=False
+    )
+
+    if total_completed > 0:
+        embed.add_field(
+            name="🎯 Досяг",
+            value="✅ Вже завершив хоча б одну баночку!",
+            inline=False
+        )
+
+    if ctx.author.avatar:
+        embed.set_thumbnail(url=ctx.author.avatar.url)
+
+    await ctx.send(embed=embed)
 
 # ============ КНОПКИ ============
 
 class GameView(discord.ui.View):
     """Вьюха з кнопками гри."""
-    
+
     def __init__(self, user_id: int, server_id: int):
         super().__init__(timeout=None)
         self.user_id = user_id
         self.server_id = server_id
-    
+
     @discord.ui.button(
         label="Клік",
         emoji=EMOJI_CLICK,
@@ -1084,7 +1285,7 @@ class GameView(discord.ui.View):
         """Кнопка клік."""
         user_id = interaction.user.id
         server_id = interaction.guild.id
-        
+
         if user_id != self.user_id:
             embed = discord.Embed(
                 title=EMOJI_ERROR + " Не твоя кнопка",
@@ -1093,11 +1294,11 @@ class GameView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        
+
         # Перевірка cooldown
         key = (user_id, server_id)
         current_time = time.time()
-        
+
         if key in click_cooldowns:
             last_click = click_cooldowns[key]
             if current_time - last_click < CLICK_COOLDOWN:
@@ -1109,7 +1310,7 @@ class GameView(discord.ui.View):
                 )
                 await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
-        
+
         player = get_player(user_id, server_id)
         if not player:
             embed = discord.Embed(
@@ -1119,14 +1320,14 @@ class GameView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        
+
         earned = player["income_per_click"]
         add_money(user_id, server_id, earned)
         update_click_time(user_id, server_id, current_time)
         click_cooldowns[key] = current_time
-        
+
         player = get_player(user_id, server_id)
-        
+
         embed = discord.Embed(
             title=f"{EMOJI_CLICK} Гра Клікер - {interaction.user.name}",
             color=COLOR_INFO
@@ -1146,7 +1347,7 @@ class GameView(discord.ui.View):
             value=f"**{player['income_per_click']}**",
             inline=True
         )
-        
+
         # Додаємо прибиль від бізнесу
         business_profit = get_total_profit(user_id, server_id)
         if business_profit > 0:
@@ -1155,10 +1356,10 @@ class GameView(discord.ui.View):
                 value=f"**{business_profit:.2f}** 💵 в 15 секунд",
                 inline=False
             )
-        
+
         await interaction.response.defer()
         await interaction.message.edit(embed=embed)
-    
+
     @discord.ui.button(
         label="Апгрейд Клік",
         emoji=EMOJI_UPGRADE,
@@ -1169,7 +1370,7 @@ class GameView(discord.ui.View):
         """Кнопка апгрейду кліка."""
         user_id = interaction.user.id
         server_id = interaction.guild.id
-        
+
         if user_id != self.user_id:
             embed = discord.Embed(
                 title=EMOJI_ERROR + " Не твоя кнопка",
@@ -1178,7 +1379,7 @@ class GameView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        
+
         player = get_player(user_id, server_id)
         if not player:
             embed = discord.Embed(
@@ -1188,9 +1389,9 @@ class GameView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        
+
         cost = calculate_upgrade_cost(BASE_CLICK_UPGRADE_COST, player["level"])
-        
+
         if player["money"] < cost:
             embed = discord.Embed(
                 title=EMOJI_ERROR + " Не вистачає грошей",
@@ -1199,10 +1400,10 @@ class GameView(discord.ui.View):
             )
             await interaction.response.send_message(embed=embed, ephemeral=True)
             return
-        
+
         if upgrade_income_per_click(user_id, server_id):
             player = get_player(user_id, server_id)
-            
+
             embed = discord.Embed(
                 title=f"{EMOJI_CLICK} Гра Клікер - {interaction.user.name}",
                 color=COLOR_INFO
@@ -1222,7 +1423,7 @@ class GameView(discord.ui.View):
                 value=f"**{player['income_per_click']}**",
                 inline=True
             )
-            
+
             # Додаємо прибиль від бізнесу
             business_profit = get_total_profit(user_id, server_id)
             if business_profit > 0:
@@ -1231,7 +1432,7 @@ class GameView(discord.ui.View):
                     value=f"**{business_profit:.2f}** 💵 в 15 секунд",
                     inline=False
                 )
-            
+
             await interaction.response.defer()
             await interaction.message.edit(embed=embed)
         else:
@@ -1273,7 +1474,7 @@ async def update_game_display():
                         value=f"**{player['income_per_click']}**",
                         inline=True
                     )
-                    
+
                     # Додаємо загальну прибиль від всіх бізнесів
                     business_profit = get_total_profit(user_id, server_id)
                     if business_profit > 0:
@@ -1282,19 +1483,19 @@ async def update_game_display():
                             value=f"**{business_profit:.2f}** 💵 в 15 секунд",
                             inline=False
                         )
-                    
+
                     await message.edit(embed=embed)
                 else:
                     games_to_remove.append((user_id, server_id))
             except Exception as e:
                 # Якщо помилка - видаляємо гру з активних
                 games_to_remove.append((user_id, server_id))
-        
+
         # Видаляємо неактивні ігри
         for key in games_to_remove:
             if key in active_games:
                 del active_games[key]
-                
+
     except Exception as e:
         print(f"❌ Помилка в оновленні меню: {e}")
 
@@ -1307,3 +1508,8 @@ async def before_update_game_display():
 
 if __name__ == "__main__":
     bot.run(TOKEN)
+
+
+
+
+
